@@ -1,0 +1,50 @@
+server:
+  port: ${BACKEND_PORT:8000}
+
+spring:
+  application:
+    name: facturacion-backend
+
+  # MySQL JPA Transaccional
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:facturacion_transaccional}?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
+    username: ${MYSQL_USER:facturacion_mysql}
+    password: ${MYSQL_PASSWORD:facturacion_mysql_dev}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  # MongoDB Productos e Imagenes (GridFS)
+  data:
+    mongodb:
+      host: ${MONGO_HOST:localhost}
+      port: ${MONGO_PORT:27018}
+      database: ${MONGO_DB:facturacion_productos}
+      username: ${MONGO_USER:facturacion_mongo}
+      password: ${MONGO_PASSWORD:facturacion_mongo_dev}
+      authentication-database: ${MONGO_AUTH_SOURCE:admin}
+
+  # Cassandra Clientes
+  cassandra:
+    contact-points: ${CASSANDRA_HOSTS:localhost}
+    port: ${CASSANDRA_PORT:9042}
+    keyspace-name: ${CASSANDRA_KEYSPACE:facturacion_clientes}
+    local-datacenter: ${CASSANDRA_DC:datacenter1}
+    schema-action: NONE
+
+app:
+  druid:
+    router-url: ${DRUID_ROUTER_URL:http://localhost:8888}
+    overlord-url: ${DRUID_OVERLORD_URL:http://localhost:8081}
+    datasource: ${DRUID_DATASOURCE:facturas_analiticas}
+  outbox:
+    poll-interval-seconds: ${OUTBOX_POLL_INTERVAL_SECONDS:5}
+    batch-size: 10
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}

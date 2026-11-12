@@ -1,0 +1,10 @@
+import React from 'react';
+
+export const LoadingSpinner: React.FC<{ texto?: string }> = ({ texto = 'Cargando datos...' }) => {
+  return (
+    <div className="flex flex-col items-center justify-center p-12 text-slate-500">
+      <div className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+      <p className="mt-3 text-xs font-medium uppercase tracking-wider">{texto}</p>
+    </div>
+  );
+};

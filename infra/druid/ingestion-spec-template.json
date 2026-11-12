@@ -1,0 +1,49 @@
+{
+  "type": "index_parallel",
+  "spec": {
+    "dataSchema": {
+      "dataSource": "facturas_analiticas",
+      "timestampSpec": {
+        "column": "fecha_factura",
+        "format": "iso"
+      },
+      "dimensionsSpec": {
+        "dimensions": [
+          { "type": "long", "name": "id_factura" },
+          "numero_factura",
+          "id_cliente",
+          "categoria_cliente",
+          "id_producto",
+          "nombre_producto",
+          "categoria_producto",
+          { "type": "double", "name": "precio_unitario" },
+          { "type": "long", "name": "cantidad" },
+          { "type": "double", "name": "total_producto" },
+          { "type": "double", "name": "total_factura" }
+        ]
+      },
+      "metricsSpec": [],
+      "granularitySpec": {
+        "type": "uniform",
+        "segmentGranularity": "DAY",
+        "queryGranularity": "NONE",
+        "rollup": false
+      }
+    },
+    "ioConfig": {
+      "type": "index_parallel",
+      "inputSource": {
+        "type": "inline",
+        "data": ""
+      },
+      "inputFormat": {
+        "type": "json"
+      },
+      "appendToExisting": true
+    },
+    "tuningConfig": {
+      "type": "index_parallel",
+      "maxRowsPerSegment": 5000000
+    }
+  }
+}

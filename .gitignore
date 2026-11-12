@@ -1,0 +1,32 @@
+# Entorno y secretos (¡Muy importante!)
+.env
+
+# Java / Maven / Spring Boot
+target/
+*.jar
+*.war
+*.ear
+*.class
+hs_err_pid*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.coverage
+
+# Node / Frontend
+node_modules/
+dist/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# IDE / Sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

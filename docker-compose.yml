@@ -1,0 +1,275 @@
+services:
+  cassandra:
+    image: cassandra:4.1
+    container_name: facturacion-cassandra
+    ports:
+      - "${CASSANDRA_PORT:-9042}:9042"
+    environment:
+      CASSANDRA_CLUSTER_NAME: FacturacionCluster
+      CASSANDRA_DC: "${CASSANDRA_DC:-datacenter1}"
+      CASSANDRA_ENDPOINT_SNITCH: SimpleSnitch
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'describe keyspaces' || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - facturacion_net
+    restart: unless-stopped
+
+  cassandra-init:
+    image: cassandra:4.1
+    container_name: facturacion-cassandra-init
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    volumes:
+      - ./infra/cassandra/init.cql:/init.cql:ro
+    entrypoint: ["/bin/bash", "-c", "cqlsh cassandra 9042 -f /init.cql"]
+    networks:
+      - facturacion_net
+    restart: "no"
+
+  mongodb:
+    image: mongo:7.0
+    container_name: facturacion-mongodb
+    ports:
+      - "${MONGO_PORT:-27018}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD}"
+      MONGO_INITDB_DATABASE: "${MONGO_DB:-facturacion_productos}"
+    volumes:
+      - mongo_data:/data/db
+      - ./infra/mongodb/init-indexes.js:/docker-entrypoint-initdb.d/init-indexes.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+    networks:
+      - facturacion_net
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: facturacion-mysql
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MYSQL_DATABASE: "${MYSQL_DATABASE:-facturacion_transaccional}"
+      MYSQL_USER: "${MYSQL_USER}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./infra/mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 30s
+    networks:
+      - facturacion_net
+    restart: unless-stopped
+
+  # --- Componentes de Apache Druid (uso exclusivo analitico) ---
+  druid-zookeeper:
+    image: zookeeper:3.9
+    container_name: facturacion-druid-zookeeper
+    environment:
+      ZOO_MY_ID: 1
+    healthcheck:
+      test: ["CMD-SHELL", "zkServer.sh status || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 15s
+    networks:
+      - facturacion_net
+    restart: unless-stopped
+
+  druid-postgres:
+    image: postgres:16-alpine
+    container_name: facturacion-druid-postgres
+    environment:
+      POSTGRES_DB: druid
+      POSTGRES_USER: "${DRUID_META_USER:-druid}"
+      POSTGRES_PASSWORD: "${DRUID_META_PASSWORD}"
+    volumes:
+      - druid_metadata_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DRUID_META_USER:-druid} -d druid"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - facturacion_net
+    restart: unless-stopped
+
+  druid-coordinator:
+    image: apache/druid:30.0.0
+    container_name: facturacion-druid-coordinator
+    depends_on:
+      druid-zookeeper:
+        condition: service_healthy
+      druid-postgres:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    command:
+      - coordinator
+    env_file:
+      - ./infra/druid/druid.env
+    environment:
+      druid_metadata_storage_connector_user: "${DRUID_META_USER:-druid}"
+      druid_metadata_storage_connector_password: "${DRUID_META_PASSWORD}"
+    volumes:
+      - druid_shared:/opt/shared
+      - druid_coordinator_var:/opt/druid/var
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/status/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+    networks:
+      - facturacion_net
+    restart: unless-stopped
+
+  druid-broker:
+    image: apache/druid:30.0.0
+    container_name: facturacion-druid-broker
+    depends_on:
+      druid-coordinator:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    command:
+      - broker
+    env_file:
+      - ./infra/druid/druid.env
+    environment:
+      druid_metadata_storage_connector_user: "${DRUID_META_USER:-druid}"
+      druid_metadata_storage_connector_password: "${DRUID_META_PASSWORD}"
+    volumes:
+      - druid_broker_var:/opt/druid/var
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/status/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+    networks:
+      - facturacion_net
+    restart: unless-stopped
+
+  druid-historical:
+    image: apache/druid:30.0.0
+    container_name: facturacion-druid-historical
+    depends_on:
+      druid-coordinator:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    command:
+      - historical
+    env_file:
+      - ./infra/druid/druid.env
+    environment:
+      druid_metadata_storage_connector_user: "${DRUID_META_USER:-druid}"
+      druid_metadata_storage_connector_password: "${DRUID_META_PASSWORD}"
+    volumes:
+      - druid_shared:/opt/shared
+      - druid_historical_var:/opt/druid/var
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/status/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+    networks:
+      - facturacion_net
+    restart: unless-stopped
+
+  druid-middlemanager:
+    image: apache/druid:30.0.0
+    container_name: facturacion-druid-middlemanager
+    depends_on:
+      druid-coordinator:
+        condition: service_healthy
+    ports:
+      - "8091:8091"
+    command:
+      - middleManager
+    env_file:
+      - ./infra/druid/druid.env
+    environment:
+      druid_metadata_storage_connector_user: "${DRUID_META_USER:-druid}"
+      druid_metadata_storage_connector_password: "${DRUID_META_PASSWORD}"
+      druid_indexer_runner_javaOptsArray: '["-server","-Xms256m","-Xmx512m","-XX:MaxDirectMemorySize=256m","-Duser.timezone=UTC","-Dfile.encoding=UTF-8","-XX:+ExitOnOutOfMemoryError","-Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"]'
+      druid_indexer_fork_property_druid_processing_buffer_sizeBytes: 64MiB
+    volumes:
+      - druid_shared:/opt/shared
+      - druid_middle_var:/opt/druid/var
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8091/status/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+    networks:
+      - facturacion_net
+    restart: unless-stopped
+
+  druid-router:
+    image: apache/druid:30.0.0
+    container_name: facturacion-druid-router
+    depends_on:
+      druid-coordinator:
+        condition: service_healthy
+      druid-broker:
+        condition: service_healthy
+    ports:
+      - "8888:8888"
+    command:
+      - router
+    env_file:
+      - ./infra/druid/druid.env
+    environment:
+      druid_metadata_storage_connector_user: "${DRUID_META_USER:-druid}"
+      druid_metadata_storage_connector_password: "${DRUID_META_PASSWORD}"
+    volumes:
+      - druid_router_var:/opt/druid/var
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8888/status/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+    networks:
+      - facturacion_net
+    restart: unless-stopped
+
+volumes:
+  cassandra_data:
+  mongo_data:
+  mysql_data:
+  druid_metadata_data:
+  druid_shared:
+  druid_coordinator_var:
+  druid_broker_var:
+  druid_historical_var:
+  druid_middle_var:
+  druid_router_var:
+
+networks:
+  facturacion_net:
+    driver: bridge
